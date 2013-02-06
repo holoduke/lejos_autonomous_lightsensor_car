@@ -12,7 +12,7 @@ import lejos.robotics.Color;
 import lejos.util.Delay;
 
 
-public class GameThread extends Thread {
+public class RobotThread extends Thread {
 
 	
 	private NXTRegulatedMotor leftMotor = new NXTRegulatedMotor(MotorPort.A);
