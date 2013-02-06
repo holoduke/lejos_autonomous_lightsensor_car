@@ -15,86 +15,117 @@ import lejos.util.Delay;
 public class GameThread extends Thread {
 
 	
-	private NXTRegulatedMotor motorA = new NXTRegulatedMotor(MotorPort.A);
-	private NXTRegulatedMotor motorB = new NXTRegulatedMotor(MotorPort.B);
-	private NXTRegulatedMotor motorC = new NXTRegulatedMotor(MotorPort.C);
+	private NXTRegulatedMotor leftMotor = new NXTRegulatedMotor(MotorPort.A);
+	private NXTRegulatedMotor rightMotor = new NXTRegulatedMotor(MotorPort.B);
+	private NXTRegulatedMotor turnMotor = new NXTRegulatedMotor(MotorPort.C);
+	private ColorSensor color = new ColorSensor(SensorPort.S1);
 	
-	public static void main(String[] args) {
-	}
+	int targetedTurnAngle = 0; //targeted turn angle. this value is not read from the engine itself. our program makes sure that motor gets this value
+	int currentTacho = 0; // current known turn angle read from the motor itself.
+	int maxTurnAngle = 90; //maximum angle in which car can steer
 	
-	public String getColorString(int color){
-		switch (color){
-		case lejos.robotics.Color.BLACK:
-			return "Black";
-		case lejos.robotics.Color.YELLOW:
-			return "Yellow";
-		case lejos.robotics.Color.RED:
-			return "Red";
-		}
+	int engineSpeed = 250;
+	int targetedEngineSpeed = engineSpeed;
+	int turboSpeed = 1500;
+	
+	int colorRead; //current known color
+	
+	long tickTime;
+	long tickDiff;
+	
+
+	/**
+	 * initialize the starting motor speeds/accelerations
+	 */
+	private void setupMotors(){
+		leftMotor.setSpeed(engineSpeed);
+		leftMotor.setAcceleration(780);
 		
-		return "color not dedected "+color;
+		rightMotor.setSpeed(engineSpeed);
+		rightMotor.setAcceleration(780);
+		
+		leftMotor.backward();
+		rightMotor.backward();
+		
+		turnMotor.setAcceleration(720);
+		turnMotor.setSpeed(720);
 	}
 	
-	public int getSpeed(int speed, int angle, int maxAngle){
+	/**
+	 * retreives correct inner wheel speed
+	 * @param speed
+	 * @param angle
+	 * @param maxAngle
+	 * @return
+	 */
+	private int calculateInnerWheelSpeed(int speed, int angle, int maxAngle){
 
 	    int maxSpeedDiff = 200;
 	    	    
 	    return (int) (speed - (float)((float) angle/ (float) maxAngle * (float)maxSpeedDiff));
 	}
-
+	
+	/**
+	 * When the car is turning the inner rear wheel should make less generations
+	 * this method simulates the differential and makes sure that the inner wheel rotates correctly
+	 * @param speed
+	 * @param angle
+	 * @param maxAngle
+	 * @return int speed of the inner wheel
+	 */
+	private void adjustInnerWheelSpeed(){
+		
+		int speed = calculateInnerWheelSpeed(targetedEngineSpeed,Math.abs(currentTacho),maxTurnAngle);
+		
+		if (currentTacho < 0){	
+			leftMotor.setSpeed(speed);
+		}
+		else if (currentTacho >= 0){
+			rightMotor.setSpeed(speed);
+		}
+	}
+	
+	/**
+	 * turns the wheels according requested turn angle
+	 */
+	private void performTurn(){
+		if (turnMotor.getPosition() != targetedTurnAngle){
+			turnMotor.rotateTo(targetedTurnAngle,true);
+		}
+	}
+	
+	/**
+	 * Thread runner.
+	 */
 	public void run(){
-		int i = 0;
 
-		ColorSensor color = new ColorSensor(SensorPort.S1);
+		setupMotors();
 
-		int engineSpeed = 250;
-		int targetedEngineSpeed = engineSpeed;
-		int turboSpeed = 1500;
-		int maxTurnAngle = 90;
-		
-		motorA.setSpeed(engineSpeed);
-		motorA.setAcceleration(780);
-		
-		motorB.setSpeed(engineSpeed);
-		motorB.setAcceleration(780);
-		
-		motorA.backward();
-		motorB.backward();
-		
-		motorC.setAcceleration(720);
-		motorC.setSpeed(720);
-		//motorC.rotate(100);
-		//motorC.rotate(-100);
-		
-		long ms2 = System.currentTimeMillis();
+		tickTime = System.currentTimeMillis();
 		
 		boolean rightTouch = false;
 		boolean leftTouch = false;
 		int rightTouchDur = 0;
 		int leftTouchDur = 0;
-		
-		int angle = 0;
-		
+			
 		float expTurnIn = 1;
 		float expTurnOut = 1;
 		
 		while (true){
 					
-			i++;
-			int currentTacho = motorC.getTachoCount();
-			int colorRead = color.getColor().getColor();
+			//read current tacho angle from turn motor
+			currentTacho = turnMotor.getTachoCount();
 			
-			long tick = System.currentTimeMillis() - ms2;
-						
-			if (tick > 50){				
+			//read current color
+			colorRead = color.getColor().getColor();
+			
+			tickDiff = System.currentTimeMillis() - tickTime;
+			
+			//every 50ms we check if the car should go left or right.
+			//we dont do this in max runtime speed, to prevent overflowing the device
+			if (tickDiff > 50){				
 				
-				if (i==50){
-					Sound.playTone(2349,250,1000);
-					i =0;
-				}
-								
-				ms2 = System.currentTimeMillis();
-				
+				tickTime = System.currentTimeMillis();
 				
 				if (leftTouchDur > 500 || rightTouchDur > 500){
 					//targetedEngineSpeed = turboSpeed;
@@ -104,36 +135,26 @@ public class GameThread extends Thread {
 				}
 				
 				
-				int speed = getSpeed(targetedEngineSpeed,Math.abs(currentTacho),maxTurnAngle);
-				
-				if (currentTacho < 0){	
-					motorA.setSpeed(speed);
-				}
-				else if (currentTacho >= 0){
-					motorB.setSpeed(speed);
-				}
-			
+				//adjust inner wheel speed
+				adjustInnerWheelSpeed();
+				 
 				if (leftTouch == true){
 					
 					leftTouchDur += 50;
 					expTurnOut = 1;
-					expTurnIn += 0.6;
+					expTurnIn += 0.1;
 					
-					angle += expTurnIn * 1;
-					angle = Math.min(maxTurnAngle, angle);
-		
+					targetedTurnAngle += expTurnIn * 2;
+					targetedTurnAngle = Math.min(maxTurnAngle, targetedTurnAngle);
 				}				
 				else if (rightTouch == true){
-//					
+					
 					rightTouchDur +=50;
 					expTurnOut = 1;
-					expTurnIn += 0.6;
+					expTurnIn += 0.1;
 					
-					angle -= expTurnIn * 1;
-					angle = Math.max(-maxTurnAngle, angle);
-					
-					LCD.drawString("rt: "+angle, 0, 0);
-
+					targetedTurnAngle -= expTurnIn * 2;
+					targetedTurnAngle = Math.max(-maxTurnAngle, targetedTurnAngle);
 				}
 				else{
 					
@@ -141,72 +162,42 @@ public class GameThread extends Thread {
 					rightTouchDur = 0;
 					
 					expTurnIn = 1;
-					expTurnOut += 0.6;
+					expTurnOut += 0.05;
 					
-					if (angle < 0){
-						angle += expTurnOut;
-						angle = Math.min(0, angle);
+					if (targetedTurnAngle < 0){
+						targetedTurnAngle += expTurnOut * 2;
+						targetedTurnAngle = Math.min(0, targetedTurnAngle);
 					}
-					else if (angle > 0){
-						angle -= expTurnOut;
-						angle = Math.max(0, angle);
+					else if (targetedTurnAngle > 0){
+						targetedTurnAngle -= expTurnOut * 2;
+						targetedTurnAngle = Math.max(0, targetedTurnAngle);
 					}
 				}				
 			}
 			
-			
-			
+			//check in maximum speed the current color. 
+			//based on the booleans set we perform certain actions in above 50ms capped procedure
 			switch (colorRead){
-			case lejos.robotics.Color.YELLOW:
-				
-				rightTouch = false;
-				
-				LCD.drawString("green: "+angle, 0, 0);
-				//motorC.rotateTo(angle,true);
-			
-				leftTouch = true;	
-			
-			break;
-			case lejos.robotics.Color.BLUE:
-				
-				leftTouch = false;
-				LCD.drawString("blue: "+angle, 0, 0);
-				//motorC.rotateTo(angle,true);
-				
-				rightTouch = true;
-
-			break;
-			case lejos.robotics.Color.RED:
-				//motorA.setSpeed(50);
-				//motorB.setSpeed(50);
-				break;	
-			default:
-				LCD.drawString("none: "+angle, 0, 0);
-				//LCD.drawString("straight", 0, 0);
-				//motorC.rotateTo(angle,true);
-				
-				leftTouch = false;
-				rightTouch = false;
-	
+				case lejos.robotics.Color.GREEN:
+					rightTouch = false;
+					leftTouch = true;	
 				break;
+				case lejos.robotics.Color.BLUE:
+					leftTouch = false;
+					rightTouch = true;
+				break;
+				case lejos.robotics.Color.RED:
+					//TODO
+				break;	
+				default:
+					leftTouch = false;
+					rightTouch = false;
+					break;
 			}
 			
-			
-			if (motorC.getPosition() != angle){
-				motorC.rotateTo(angle,true);
-			}
-			
-			
-//			Delay.msDelay(500);
+			//perform turn actions
+			performTurn();
 		}
 	}
-	
-	public void Steer(int Angle){
-		int maxAngle = 100;
-		
-		
-		
-	}
-	
 	
 }
